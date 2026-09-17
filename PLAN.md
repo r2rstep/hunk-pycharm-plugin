@@ -118,10 +118,10 @@ interface HunkReviewUiHost : Disposable {
 
 | Phase | Deliverable | Verification |
 |---|---|---|
-| **0** | Repo/Gradle scaffold, empty plugin loads | `./gradlew runIde` opens PyCharm Professional sandbox with an empty "Hunk Review" tool window; `./gradlew verifyPlugin` clean; confirm exact product-accessor name (`pycharmProfessional(...)` vs unified `create(...)`) and pty4j visibility via IDE code completion — don't guess from docs |
-| **1** | CLI bridge + hidden-PTY spawn + pid→sessionId resolution + read-only file tree (plain Swing, no collab-tools) | Action spawns a hidden PTY (`pgrep -af hunk` shows a new pid not attached to a real `/dev/pts/*`); tool window populates from real `session list`/`session review`; process is cleanly killed on project close with nothing orphaned |
-| **2** | `CollaborationToolsHunkReviewUiHost` behind the adapter; navigate-on-select | Visual/behavioral comparison against the real GitHub/GitLab MR review tool window; selecting a hunk in PyCharm visibly moves the cursor in a real-terminal `hunk diff` on the same session; `verifyPlugin` checked for internal-API warnings |
-| **3** | Inline comment authoring + polling live sync | Comment added in PyCharm's gutter appears in a real terminal `hunk` session within one poll interval and vice versa; `comment apply --stdin` batch schema confirmed or bypassed |
+| **0** ✅ | Repo/Gradle scaffold, empty plugin loads | `./gradlew runIde` opens PyCharm Professional sandbox with an empty "Hunk Review" tool window; `./gradlew verifyPlugin` clean; confirm exact product-accessor name (`pycharmProfessional(...)` vs unified `create(...)`) and pty4j visibility via IDE code completion — don't guess from docs |
+| **1** ✅ | CLI bridge + hidden-PTY spawn + pid→sessionId resolution + read-only file tree (plain Swing, no collab-tools) | Action spawns a hidden PTY (`pgrep -af hunk` shows a new pid not attached to a real `/dev/pts/*`); tool window populates from real `session list`/`session review`; process is cleanly killed on project close with nothing orphaned |
+| **2** ◐ | Native PyCharm diff viewer, file/hunk navigation, and hunk-to-terminal synchronization | Native diff rendering, file selection, and hunk selection are implemented and verifier-checked; full collaboration-tools review-host parity remains pending |
+| **3** ✅ | Inline comment authoring, prefixed user comments, inline comment cards, replies, and polling live sync | Gutter `+` opens an inline editor; `Ctrl+Enter` saves; top-level PyCharm comments use `[author:user]` and hide it in the plugin; replies use `--reply-to` without the prefix; end-to-end user/AI reply identity still needs verification |
 | **4 (optional)** | VCS Log "Review commit/range with Hunk"; TS push-extension replacing polling | Spike only, not required for a working MVP |
 
 ## Open items to verify once implementation starts
@@ -132,6 +132,7 @@ interface HunkReviewUiHost : Disposable {
 4. Exact IntelliJ Platform Gradle Plugin 2.x accessor for "PyCharm Professional" given signs of a 2025.3+ IU/PY product unification.
 5. Minimum `hunk` version to require in `HunkCliLocator` (0.22.0 confirmed to have the full `session` family; re-check the changelog immediately before coding, since the CLI is pre-1.0 and this surface is actively moving).
 6. Replace the Phase-1 hard-coded `hunk diff master` target with a client-selectable comparison ref (branch, commit, or range), exposed through the action or plugin settings. The current MVP uses `master` so staged and unstaged changes are reviewed together.
+7. Verify replying to comments created by both a user and an AI agent: PyCharm-created replies must remain unprefixed, user replies must render with the user identity, and unprefixed AI replies must render as `AI agent`.
 
 ## Environment note
 

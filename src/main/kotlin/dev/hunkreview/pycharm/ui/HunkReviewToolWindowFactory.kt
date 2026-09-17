@@ -17,6 +17,12 @@ class HunkReviewToolWindowFactory : ToolWindowFactory {
 
         uiHost.onFileSelected { path -> service.selectFile(path) }
         uiHost.onHunkSelected { path, hunkIndex -> service.selectHunk(path, hunkIndex) }
+        uiHost.onCommentRequested { path, hunkIndex, line, oldLine, summary, rationale ->
+            service.addComment(path, hunkIndex, line, oldLine, summary, rationale)
+        }
+        uiHost.onReplyRequested { noteId, summary, rationale ->
+            service.addReply(noteId, summary, rationale)
+        }
 
         val content = ContentFactory.getInstance().createContent(uiHost.component, "", false)
         toolWindow.contentManager.addContent(content)

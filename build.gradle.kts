@@ -39,6 +39,7 @@ dependencies {
         // PatchReader lives in the IDE's VCS implementation module and is
         // used to turn Hunk's unified patch into a native diff request.
         bundledModule("intellij.platform.vcs.impl")
+        bundledModule("intellij.platform.collaborationTools")
 
     }
 

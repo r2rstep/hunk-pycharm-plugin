@@ -21,4 +21,6 @@ interface HunkReviewUiHost : Disposable {
     fun updateNotes(notes: List<HunkNote>)
     fun onFileSelected(handler: (path: String) -> Unit)
     fun onHunkSelected(handler: (path: String, hunkIndex: Int) -> Unit)
+    fun onCommentRequested(handler: (path: String, hunkIndex: Int, line: Int, oldLine: Boolean, summary: String, rationale: String?) -> Unit)
+    fun onReplyRequested(handler: (noteId: String, summary: String, rationale: String?) -> Unit)
 }

@@ -54,6 +54,29 @@ class HunkCliInvoker(private val binaryPath: String) {
         run("session", "navigate", sessionId, "--file", filePath, "--hunk", (hunkIndex + 1).toString())
     }
 
+    fun addComment(sessionId: String, filePath: String, line: Int, oldLine: Boolean, summary: String, rationale: String?) {
+        buildList {
+            add("session"); add("comment"); add("add"); add(sessionId)
+            add("--file"); add(filePath)
+            add(if (oldLine) "--old-line" else "--new-line"); add(line.toString())
+            add("--summary"); add(summary)
+            if (!rationale.isNullOrBlank()) {
+                add("--rationale"); add(rationale)
+            }
+        }.let { run(*it.toTypedArray()) }
+    }
+
+    fun addReply(sessionId: String, noteId: String, summary: String, rationale: String?) {
+        buildList {
+            add("session"); add("comment"); add("add"); add(sessionId)
+            add("--reply-to"); add(noteId)
+            add("--summary"); add(summary)
+            if (!rationale.isNullOrBlank()) {
+                add("--rationale"); add(rationale)
+            }
+        }.let { run(*it.toTypedArray()) }
+    }
+
     private fun run(vararg args: String): ProcessOutput {
         val commandLine = GeneralCommandLine(binaryPath, *args)
         val output = ExecUtil.execAndGetOutput(commandLine)

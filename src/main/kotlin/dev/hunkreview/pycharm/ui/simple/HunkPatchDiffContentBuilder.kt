@@ -12,6 +12,36 @@ import dev.hunkreview.pycharm.model.HunkFileDetail
 /** Converts Hunk's unified patch into the platform's native diff request. */
 object HunkPatchDiffContentBuilder {
 
+    data class LineAnchor(val sourceLine: Int, val hunkIndex: Int)
+
+    data class LineMap(val before: List<LineAnchor>, val after: List<LineAnchor>)
+
+    fun lineMap(detail: HunkFileDetail, selectedHunkIndex: Int? = null): LineMap? {
+        val patchText = detail.patch ?: return null
+        val filePatch = runCatching { PatchReader(patchText).readTextPatches().firstOrNull() }.getOrNull() ?: return null
+        val hunks = selectedHunkIndex?.let { index ->
+            filePatch.hunks.getOrNull(index)?.let { listOf(it) }
+        } ?: filePatch.hunks
+        val before = mutableListOf<LineAnchor>()
+        val after = mutableListOf<LineAnchor>()
+        hunks.forEachIndexed { fallbackIndex, hunk ->
+            var oldLine = hunk.startLineBefore + 1
+            var newLine = hunk.startLineAfter + 1
+            val hunkIndex = selectedHunkIndex ?: fallbackIndex
+            hunk.lines.forEach { line ->
+                when (line.type) {
+                    PatchLine.Type.CONTEXT -> {
+                        before += LineAnchor(oldLine++, hunkIndex)
+                        after += LineAnchor(newLine++, hunkIndex)
+                    }
+                    PatchLine.Type.REMOVE -> before += LineAnchor(oldLine++, hunkIndex)
+                    PatchLine.Type.ADD -> after += LineAnchor(newLine++, hunkIndex)
+                }
+            }
+        }
+        return LineMap(before, after)
+    }
+
     fun build(detail: HunkFileDetail, selectedHunkIndex: Int? = null): SimpleDiffRequest? {
         val patchText = detail.patch ?: return null
         val filePatch = runCatching {

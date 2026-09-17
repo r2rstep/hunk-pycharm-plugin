@@ -12,10 +12,13 @@ import com.pty4j.PtyProcess
 import dev.hunkreview.pycharm.cli.HunkCliInvoker
 import dev.hunkreview.pycharm.cli.HunkCliLocator
 import dev.hunkreview.pycharm.ui.HunkReviewUiHost
+import dev.hunkreview.pycharm.model.PYCHARM_COMMENT_PREFIX
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 
 /**
  * Owns the hidden PTY-backed `hunk diff`/`hunk show` process for this
@@ -36,6 +39,10 @@ class HunkSessionService(private val project: Project) : Disposable {
     private val activeSessionId = AtomicReference<String?>(null)
     private val fileSelectionLock = Any()
     private val fileSelectionGeneration = AtomicLong(0)
+    private val poller = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "hunk-review-poller").apply { isDaemon = true }
+    }
+    private var notesPoll: ScheduledFuture<*>? = null
 
     val sessionId: String?
         get() = activeSessionId.get()
@@ -73,6 +80,7 @@ class HunkSessionService(private val project: Project) : Disposable {
                         val id = pollForSessionId(cliInvoker, process.pid())
                         activeSessionId.set(id)
                         refreshFileTree(id)
+                        startNotesPolling(id)
                         onReady(id)
                     } catch (e: Exception) {
                         log.warn("Failed to resolve Hunk session id", e)
@@ -132,6 +140,30 @@ class HunkSessionService(private val project: Project) : Disposable {
         }
     }
 
+    fun addComment(path: String, hunkIndex: Int, line: Int, oldLine: Boolean, summary: String, rationale: String?) {
+        val id = sessionId ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                invoker?.addComment(id, path, line, oldLine, "$PYCHARM_COMMENT_PREFIX $summary", rationale)
+                refreshNotes(id)
+            } catch (e: Exception) {
+                log.warn("Failed to add comment to '$path' hunk $hunkIndex", e)
+            }
+        }
+    }
+
+    fun addReply(noteId: String, summary: String, rationale: String?) {
+        val id = sessionId ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                invoker?.addReply(id, noteId, summary, rationale)
+                refreshNotes(id)
+            } catch (e: Exception) {
+                log.warn("Failed to add reply to comment $noteId", e)
+            }
+        }
+    }
+
     private fun refreshFileTree(id: String) {
         val cliInvoker = invoker ?: return
         try {
@@ -143,6 +175,22 @@ class HunkSessionService(private val project: Project) : Disposable {
             }
         } catch (e: Exception) {
             log.warn("Failed to refresh Hunk file tree for session $id", e)
+        }
+    }
+
+    private fun startNotesPolling(id: String) {
+        notesPoll?.cancel(false)
+        notesPoll = poller.scheduleWithFixedDelay({ refreshNotes(id) }, 2500, 2500, TimeUnit.MILLISECONDS)
+    }
+
+    private fun refreshNotes(id: String) {
+        try {
+            val (review, _) = invoker?.review(id, includeNotes = true) ?: return
+            ApplicationManager.getApplication().invokeLater {
+                if (activeSessionId.get() == id) uiHost?.updateNotes(review.reviewNotes)
+            }
+        } catch (e: Exception) {
+            log.debug("Failed to poll Hunk review notes for session $id", e)
         }
     }
 
@@ -196,6 +244,8 @@ class HunkSessionService(private val project: Project) : Disposable {
     fun stopIfRunning() {
         val process = ptyProcess ?: return
         activeSessionId.set(null)
+        notesPoll?.cancel(false)
+        notesPoll = null
         invoker = null
         ptyProcess = null
         if (process.isAlive) {
@@ -208,5 +258,6 @@ class HunkSessionService(private val project: Project) : Disposable {
 
     override fun dispose() {
         stopIfRunning()
+        poller.shutdownNow()
     }
 }
