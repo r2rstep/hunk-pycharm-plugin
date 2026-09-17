@@ -1,0 +1,29 @@
+<idea-plugin>
+    <id>dev.hunkreview.hunk</id>
+    <name>Hunk Review</name>
+    <vendor email="aart.st@gmail.com" url="https://github.com/modem-dev/hunk">Artur Stępniak</vendor>
+
+    <description><![CDATA[
+    Start and view a <a href="https://github.com/modem-dev/hunk">Hunk</a> diff/review session
+    from inside PyCharm, rendered in the IDE's own review UI, staying live-synced with the
+    underlying Hunk session (including one driven from a real terminal).
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Hunk Review"
+                    anchor="right"
+                    factoryClass="dev.hunkreview.pycharm.ui.HunkReviewToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="Hunk.StartWorkingTreeReview"
+                class="dev.hunkreview.pycharm.actions.StartHunkWorkingTreeReviewAction"
+                text="Start Hunk Review"
+                description="Start a Hunk review of the working tree and open it in the Hunk Review tool window">
+            <add-to-group group-id="Git.Menu" anchor="first"/>
+        </action>
+    </actions>
+</idea-plugin>
