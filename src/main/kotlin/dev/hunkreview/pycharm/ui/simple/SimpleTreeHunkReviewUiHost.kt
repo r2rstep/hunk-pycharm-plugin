@@ -54,6 +54,7 @@ import java.awt.event.KeyEvent
 import java.awt.Rectangle
 import java.awt.Point
 import java.awt.event.MouseEvent
+import java.nio.file.Paths
 import javax.swing.event.MouseInputAdapter
 
 /**
@@ -61,7 +62,7 @@ import javax.swing.event.MouseInputAdapter
  * Superseded (behind [HunkReviewUiHost]) by a collaboration-tools-based host
  * in Phase 2 for MR-review visual/behavioral parity.
  */
-class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
+class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHost {
 
     private val rootNode = DefaultMutableTreeNode("Hunk Review")
     private val treeModel = DefaultTreeModel(rootNode)
@@ -154,8 +155,8 @@ class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
         currentFileDetail = detail
         selectedHunkIndex = null
         selectedLine = null
-        lineMap = HunkPatchDiffContentBuilder.lineMap(detail)
-        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail))
+        lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return))
+        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return)))
         installDiffBindings(detail)
         val fileNode = (0 until rootNode.childCount)
             .map { rootNode.getChildAt(it) as DefaultMutableTreeNode }
@@ -183,9 +184,10 @@ class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
             val editor = installedEditors.getOrNull(if (newLine) 1 else 0)
                 ?: installedEditors.firstOrNull()
             val anchors = if (newLine) map.after else map.before
-            val line = anchors.indexOfFirst { it.hunkIndex == note.hunkIndex && it.sourceLine == note.newRangeStart }
-                .takeIf { it >= 0 }
-                ?: anchors.indexOfFirst { it.hunkIndex == note.hunkIndex }
+            val line = anchors.indexOfFirst { anchor ->
+                anchor?.let { it.hunkIndex == note.hunkIndex && it.sourceLine == note.newRangeStart } == true
+            }.takeIf { it >= 0 }
+                ?: anchors.indexOfFirst { it?.hunkIndex == note.hunkIndex }
             if (editor != null && line >= 0 && line < editor.document.lineCount) {
                 addNoteInlay(editor, line, note)
             }
@@ -222,8 +224,8 @@ class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
     private fun showHunk(index: Int) {
         currentFileDetail?.let { detail ->
             selectedHunkIndex = index
-            lineMap = HunkPatchDiffContentBuilder.lineMap(detail, index)
-            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, index))
+            lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return), index)
+            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), index))
             clearDiffBindings()
             installDiffBindings(detail, index)
         }
@@ -278,7 +280,7 @@ class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
         }
     }
 
-    private fun installCommentGutters(editor: Editor, anchors: List<HunkPatchDiffContentBuilder.LineAnchor>) {
+    private fun installCommentGutters(editor: Editor, anchors: List<HunkPatchDiffContentBuilder.LineAnchor?>) {
         val gutter = (editor as? EditorEx)?.gutterComponentEx ?: return
         val hoverState = HoverState()
         val hoverListener = object : MouseInputAdapter() {
@@ -295,7 +297,7 @@ class SimpleTreeHunkReviewUiHost(project: Project) : HunkReviewUiHost {
         gutter.addMouseMotionListener(hoverListener)
         gutterBindings += gutter to hoverListener
         anchors.forEachIndexed { line, anchor ->
-            if (line >= editor.document.lineCount) return@forEachIndexed
+            if (anchor == null || line >= editor.document.lineCount) return@forEachIndexed
             val highlighter = editor.markupModel.addLineHighlighter(
                 null,
                 line,

@@ -3,67 +3,111 @@ package dev.hunkreview.pycharm.ui.simple
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.contents.DiffContent
 import com.intellij.diff.requests.SimpleDiffRequest
-import com.intellij.openapi.diff.impl.patch.PatchLine
 import com.intellij.openapi.diff.impl.patch.PatchHunk
+import com.intellij.openapi.diff.impl.patch.PatchLine
 import com.intellij.openapi.diff.impl.patch.PatchReader
-import com.intellij.openapi.diff.impl.patch.TextFilePatch
 import dev.hunkreview.pycharm.model.HunkFileDetail
+import java.nio.file.Files
+import java.nio.file.Path
 
-/** Converts Hunk's unified patch into the platform's native diff request. */
+/** Builds a native diff from the complete working-tree file and Hunk's patch. */
 object HunkPatchDiffContentBuilder {
 
     data class LineAnchor(val sourceLine: Int, val hunkIndex: Int)
 
-    data class LineMap(val before: List<LineAnchor>, val after: List<LineAnchor>)
+    data class LineMap(val before: List<LineAnchor?>, val after: List<LineAnchor?>)
 
-    fun lineMap(detail: HunkFileDetail, selectedHunkIndex: Int? = null): LineMap? {
-        val patchText = detail.patch ?: return null
-        val filePatch = runCatching { PatchReader(patchText).readTextPatches().firstOrNull() }.getOrNull() ?: return null
-        val hunks = selectedHunkIndex?.let { index ->
-            filePatch.hunks.getOrNull(index)?.let { listOf(it) }
-        } ?: filePatch.hunks
-        val before = mutableListOf<LineAnchor>()
-        val after = mutableListOf<LineAnchor>()
-        hunks.forEachIndexed { fallbackIndex, hunk ->
-            var oldLine = hunk.startLineBefore + 1
-            var newLine = hunk.startLineAfter + 1
-            val hunkIndex = selectedHunkIndex ?: fallbackIndex
-            hunk.lines.forEach { line ->
-                when (line.type) {
-                    PatchLine.Type.CONTEXT -> {
-                        before += LineAnchor(oldLine++, hunkIndex)
-                        after += LineAnchor(newLine++, hunkIndex)
-                    }
-                    PatchLine.Type.REMOVE -> before += LineAnchor(oldLine++, hunkIndex)
-                    PatchLine.Type.ADD -> after += LineAnchor(newLine++, hunkIndex)
-                }
-            }
-        }
-        return LineMap(before, after)
-    }
+    private data class ParsedPatch(val hunks: List<PatchHunk>, val afterText: String)
 
-    fun build(detail: HunkFileDetail, selectedHunkIndex: Int? = null): SimpleDiffRequest? {
-        val patchText = detail.patch ?: return null
-        val filePatch = runCatching {
-            PatchReader(patchText).readTextPatches().firstOrNull()
-        }.getOrNull() ?: return null
+    fun lineMap(detail: HunkFileDetail, basePath: Path, selectedHunkIndex: Int? = null): LineMap? =
+        render(detail, basePath, selectedHunkIndex)?.let { LineMap(it.beforeAnchors, it.afterAnchors) }
 
-        val hunks = selectedHunkIndex?.let { index ->
-            filePatch.hunks.getOrNull(index)?.let { listOf(it) }
-        } ?: filePatch.hunks
-        if (selectedHunkIndex != null && hunks.isEmpty()) return null
-
-        val oldText = buildText(hunks, setOf(PatchLine.Type.CONTEXT, PatchLine.Type.REMOVE))
-        val newText = buildText(hunks, setOf(PatchLine.Type.CONTEXT, PatchLine.Type.ADD))
+    fun build(detail: HunkFileDetail, basePath: Path, selectedHunkIndex: Int? = null): SimpleDiffRequest? {
+        val rendered = render(detail, basePath, selectedHunkIndex) ?: return null
         val contentFactory = DiffContentFactory.getInstance()
-        val before: DiffContent = if (oldText.isEmpty()) contentFactory.createEmpty() else contentFactory.create(oldText)
-        val after: DiffContent = if (newText.isEmpty()) contentFactory.createEmpty() else contentFactory.create(newText)
+        val before: DiffContent = rendered.beforeText
+            .takeUnless(String::isEmpty)
+            ?.let(contentFactory::create)
+            ?: contentFactory.createEmpty()
+        val after: DiffContent = rendered.afterText
+            .takeUnless(String::isEmpty)
+            ?.let(contentFactory::create)
+            ?: contentFactory.createEmpty()
         return SimpleDiffRequest(detail.path, before, after, "Before", "After")
     }
 
-    private fun buildText(hunks: List<PatchHunk>, include: Set<PatchLine.Type>): String =
-        hunks
-            .flatMap { it.lines }
-            .filter { it.type in include }
-            .joinToString("\n") { it.text }
+    private data class RenderedDiff(
+        val beforeText: String,
+        val afterText: String,
+        val beforeAnchors: List<LineAnchor?>,
+        val afterAnchors: List<LineAnchor?>
+    )
+
+    private fun render(detail: HunkFileDetail, basePath: Path, selectedHunkIndex: Int?): RenderedDiff? {
+        val patch = parse(detail.patch) ?: return null
+        val file = basePath.resolve(detail.path).normalize()
+        if (!file.startsWith(basePath.normalize())) return null
+        val afterText = runCatching { Files.readString(file) }.getOrElse { patch.afterText }
+        val beforeText = reconstructBefore(afterText, patch.hunks)
+        val beforeLines = lines(beforeText)
+        val afterLines = lines(afterText)
+        return RenderedDiff(
+            beforeText,
+            afterText,
+            anchors(beforeLines.size, patch.hunks, before = true, selectedHunkIndex),
+            anchors(afterLines.size, patch.hunks, before = false, selectedHunkIndex)
+        )
+    }
+
+    private fun parse(patchText: String?): ParsedPatch? {
+        if (patchText == null) return null
+        val filePatch = runCatching { PatchReader(patchText).readTextPatches().firstOrNull() }.getOrNull() ?: return null
+        val afterText = filePatch.hunks.flatMap { hunk ->
+            hunk.lines.filter { it.type == PatchLine.Type.CONTEXT || it.type == PatchLine.Type.ADD }.map { it.text }
+        }.joinToString("\n")
+        return ParsedPatch(filePatch.hunks, afterText)
+    }
+
+    private fun reconstructBefore(afterText: String, hunks: List<PatchHunk>): String {
+        val afterLines = lines(afterText)
+        val beforeLines = mutableListOf<String>()
+        var afterCursor = 0
+        hunks.forEach { hunk ->
+            while (afterCursor < hunk.startLineAfter && afterCursor < afterLines.size) {
+                beforeLines += afterLines[afterCursor++]
+            }
+            hunk.lines.forEach { line ->
+                when (line.type) {
+                    PatchLine.Type.CONTEXT -> {
+                        if (afterCursor < afterLines.size) beforeLines += afterLines[afterCursor++] else beforeLines += line.text
+                    }
+                    PatchLine.Type.ADD -> if (afterCursor < afterLines.size) afterCursor++
+                    PatchLine.Type.REMOVE -> beforeLines += line.text
+                }
+            }
+        }
+        while (afterCursor < afterLines.size) beforeLines += afterLines[afterCursor++]
+        return beforeLines.joinToString("\n")
+    }
+
+    private fun anchors(size: Int, hunks: List<PatchHunk>, before: Boolean, selectedHunkIndex: Int?): List<LineAnchor?> {
+        val result = MutableList<LineAnchor?>(size) { null }
+        hunks.forEachIndexed { fallbackIndex, hunk ->
+            val hunkIndex = fallbackIndex
+            if (selectedHunkIndex != null && selectedHunkIndex != hunkIndex) return@forEachIndexed
+            var line = if (before) hunk.startLineBefore else hunk.startLineAfter
+            hunk.lines.forEach { patchLine ->
+                val included = if (before) {
+                    patchLine.type == PatchLine.Type.CONTEXT || patchLine.type == PatchLine.Type.REMOVE
+                } else {
+                    patchLine.type == PatchLine.Type.CONTEXT || patchLine.type == PatchLine.Type.ADD
+                }
+                if (included && line in result.indices) result[line] = LineAnchor(line + 1, hunkIndex)
+                if (before && patchLine.type != PatchLine.Type.ADD || !before && patchLine.type != PatchLine.Type.REMOVE) line++
+            }
+        }
+        return result
+    }
+
+    private fun lines(text: String): List<String> = if (text.isEmpty()) emptyList() else text.split('\n')
 }
