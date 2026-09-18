@@ -57,6 +57,9 @@ import java.awt.event.MouseEvent
 import java.nio.file.Paths
 import javax.swing.event.MouseInputAdapter
 
+private val THREAD_CARD_BACKGROUND = JBColor(Color(248, 249, 251), Color(38, 40, 45))
+private val THREAD_DIVIDER_COLOR = JBColor(Color(225, 227, 232), Color(55, 58, 64))
+
 /**
  * Phase 1 UI host: a plain Swing tree built only on stable platform APIs.
  * Superseded (behind [HunkReviewUiHost]) by a collaboration-tools-based host
@@ -82,6 +85,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
     private val selectionBindings = mutableListOf<Pair<Editor, SelectionListener>>()
     private val noteInlays = mutableListOf<Inlay<*>>()
     private val noteInlayTargets = mutableMapOf<Inlay<*>, HunkNote>()
+    private val noteInlayRenderers = mutableMapOf<Inlay<*>, ThreadRenderer>()
     private val mouseBindings = mutableListOf<Pair<Editor, EditorMouseListener>>()
     private val commentHighlighters = mutableListOf<Pair<Editor, RangeHighlighter>>()
     private val commentInlayManagers = mutableListOf<EditorComponentInlaysManager>()
@@ -178,18 +182,21 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
     private fun renderNotes() {
         clearNoteInlays()
         val detail = currentFileDetail ?: return
-        currentNotes.filter { it.filePath == detail.path }.forEach { note ->
+        val notesForFile = currentNotes.filter { it.filePath == detail.path }
+        val repliesByParent = notesForFile.filter { it.parentId != null }.groupBy { it.parentId }
+        notesForFile.filter { it.parentId == null }.forEach { root ->
+            val thread = listOf(root) + repliesByParent[root.noteId].orEmpty()
             val map = lineMap ?: return@forEach
-            val newLine = note.newRangeStart != null
+            val newLine = root.newRangeStart != null
             val editor = installedEditors.getOrNull(if (newLine) 1 else 0)
                 ?: installedEditors.firstOrNull()
             val anchors = if (newLine) map.after else map.before
             val line = anchors.indexOfFirst { anchor ->
-                anchor?.let { it.hunkIndex == note.hunkIndex && it.sourceLine == note.newRangeStart } == true
+                anchor?.let { it.hunkIndex == root.hunkIndex && it.sourceLine == root.newRangeStart } == true
             }.takeIf { it >= 0 }
-                ?: anchors.indexOfFirst { it?.hunkIndex == note.hunkIndex }
+                ?: anchors.indexOfFirst { it?.hunkIndex == root.hunkIndex }
             if (editor != null && line >= 0 && line < editor.document.lineCount) {
-                addNoteInlay(editor, line, note)
+                addNoteInlay(editor, line, thread)
             }
         }
     }
@@ -265,8 +272,9 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
                     override fun mouseClicked(event: EditorMouseEvent) {
                         val inlay = event.inlay ?: return
                         val note = noteInlayTargets[inlay] ?: return
-                        val bounds = inlay.bounds ?: return
-                        if (event.mouseEvent.x >= bounds.x + bounds.width - 90) {
+                        val renderer = noteInlayRenderers[inlay] ?: return
+                        val replyBounds = renderer.replyRowBounds(inlay) ?: return
+                        if (replyBounds.contains(event.mouseEvent.point)) {
                             showInlineReply(editor, inlay, note)
                             event.consume()
                         }
@@ -352,35 +360,77 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         })
     }
 
-    private fun addNoteInlay(editor: Editor, line: Int, note: HunkNote) {
+    private fun addNoteInlay(editor: Editor, line: Int, thread: List<HunkNote>) {
         val offset = editor.document.getLineEndOffset(line)
+        val renderer = ThreadRenderer(thread)
         val inlay = editor.inlayModel.addBlockElement(
             offset,
             InlayProperties().showAbove(false).relatesToPrecedingText(true).priority(-1),
-            NoteRenderer(note)
+            renderer
         )
         if (inlay != null) {
             noteInlays += inlay
-            noteInlayTargets[inlay] = note
+            noteInlayTargets[inlay] = thread.first()
+            noteInlayRenderers[inlay] = renderer
         }
     }
 
     private fun showInlineReply(editor: Editor, noteInlay: Inlay<*>, note: HunkNote) {
         val editorImpl = editor as? EditorImpl ?: return
-        val textArea = JBTextArea(3, 60).apply {
+        val textArea = JBTextArea(1, 60).apply {
             lineWrap = true
             wrapStyleWord = true
-            emptyText.text = "Write a reply"
+            emptyText.text = "Reply…"
+            border = JBUI.Borders.empty(4, 6)
         }
-        val save = javax.swing.JButton("Save reply")
+        val plainBorder = JBUI.Borders.customLine(JBColor(Color(200, 203, 210), Color(80, 84, 92)), 1)
+        val focusedBorder = JBUI.Borders.customLine(JBColor(Color(60, 130, 220), Color(90, 150, 235)), 1)
+        val inputScroll = JBScrollPane(textArea).apply {
+            border = plainBorder
+            isOpaque = false
+            viewport.isOpaque = false
+        }
+        textArea.addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusGained(e: java.awt.event.FocusEvent?) {
+                inputScroll.border = focusedBorder
+            }
+            override fun focusLost(e: java.awt.event.FocusEvent?) {
+                inputScroll.border = plainBorder
+            }
+        })
+
+        val avatar = object : JComponent() {
+            init { preferredSize = java.awt.Dimension(40, 16) }
+            override fun paintComponent(g: Graphics) {
+                g.color = JBColor(Color(100, 105, 115), Color(190, 195, 205))
+                g.fillOval(15, 0, 16, 16)
+            }
+        }
+        val inputRow = JPanel(BorderLayout(0, 0)).apply {
+            isOpaque = false
+            add(avatar, BorderLayout.WEST)
+            add(inputScroll, BorderLayout.CENTER)
+        }
+
+        val save = javax.swing.JButton("Reply")
         val cancel = javax.swing.JButton("Cancel")
-        val panel = JPanel(BorderLayout(8, 4)).apply {
-            border = JBUI.Borders.empty(8)
-            add(JBScrollPane(textArea), BorderLayout.CENTER)
-            add(JPanel().apply {
-                add(cancel)
-                add(save)
-            }, BorderLayout.SOUTH)
+        val buttonRow = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4)).apply {
+            isOpaque = false
+            add(cancel)
+            add(save)
+        }
+
+        val content = JPanel(BorderLayout(0, 4)).apply {
+            isOpaque = true
+            background = THREAD_CARD_BACKGROUND
+            border = JBUI.Borders.empty(6, 0, 8, 0)
+            add(inputRow, BorderLayout.CENTER)
+            add(buttonRow, BorderLayout.SOUTH)
+        }
+        val panel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 8, 8, 8)
+            add(content, BorderLayout.CENTER)
         }
         val manager = EditorComponentInlaysManager(editorImpl)
         commentInlayManagers += manager
@@ -411,6 +461,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         noteInlays.forEach { it.dispose() }
         noteInlays.clear()
         noteInlayTargets.clear()
+        noteInlayRenderers.clear()
     }
 
     private fun clearDiffBindings() {
@@ -472,47 +523,93 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         }
     }
 
-    private class NoteRenderer(private val note: HunkNote) : EditorCustomElementRenderer {
-        private val isUserNote = note.source.lowercase() == HUNK_SOURCE_USER
-        private val body = note.body
-        private val author = if (isUserNote) {
-            note.author ?: System.getProperty("user.name").orEmpty().ifBlank { "You" }
-        } else {
-            "AI agent"
-        }
-        private val bodyLines = body.split('\n')
+    private class ThreadRenderer(notes: List<HunkNote>) : EditorCustomElementRenderer {
+        private class Row(val label: String, val bodyLines: List<String>, val isReplyPrompt: Boolean = false)
+
+        private val rows: List<Row> = notes.map { note ->
+            val isUserNote = note.source.lowercase() == HUNK_SOURCE_USER
+            val author = if (isUserNote) {
+                note.author ?: System.getProperty("user.name").orEmpty().ifBlank { "You" }
+            } else {
+                "AI agent"
+            }
+            Row(author, note.body.split('\n'))
+        } + Row("Reply", emptyList(), isReplyPrompt = true)
+
+        private fun Row.heightInLines(): Int = bodyLines.size + 1
+
         override fun calcWidthInPixels(inlay: Inlay<*>): Int = inlay.editor.contentComponent.width.coerceAtLeast(220)
-        override fun calcHeightInPixels(inlay: Inlay<*>): Int =
-            inlay.editor.lineHeight * (bodyLines.size + 1) + 24
+        override fun calcHeightInPixels(inlay: Inlay<*>): Int {
+            val lineHeight = inlay.editor.lineHeight
+            val rowsHeight = rows.sumOf { it.heightInLines() * lineHeight }
+            val separatorsHeight = (rows.size - 1).coerceAtLeast(0) * SEPARATOR_GAP
+            return rowsHeight + separatorsHeight + 24
+        }
+
+        /** Bounds of the clickable "Reply" row, in the same coordinate space as [Inlay.getBounds]. */
+        fun replyRowBounds(inlay: Inlay<*>): Rectangle? {
+            val bounds = inlay.bounds ?: return null
+            val lineHeight = inlay.editor.lineHeight
+            var top = bounds.y + 3
+            for (index in 0 until rows.lastIndex) {
+                if (index > 0) top += SEPARATOR_GAP
+                top += rows[index].heightInLines() * lineHeight
+            }
+            if (rows.size > 1) top += SEPARATOR_GAP
+            return Rectangle(bounds.x + 8, top, bounds.width - 16, lineHeight)
+        }
 
         override fun paint(inlay: Inlay<*>, g: Graphics, targetRegion: Rectangle, textAttributes: com.intellij.openapi.editor.markup.TextAttributes) {
+            val lineHeight = inlay.editor.lineHeight
             val x = targetRegion.x + 8
             val y = targetRegion.y + 3
             val width = targetRegion.width - 16
             val height = targetRegion.height - 6
-            val headerBaseline = y + inlay.editor.lineHeight
             val bodyX = x + 40
 
-            g.color = JBColor(Color(248, 249, 251), Color(38, 40, 45))
+            g.color = THREAD_CARD_BACKGROUND
             g.fillRoundRect(x, y, width, height, 12, 12)
             g.color = JBColor(Color(185, 190, 200), Color(92, 98, 110))
             g.drawRoundRect(x, y, width - 1, height - 1, 12, 12)
 
-            g.color = JBColor(Color(100, 105, 115), Color(190, 195, 205))
-            g.fillOval(x + 15, y + 9, 16, 16)
+            var blockTop = y
+            rows.forEachIndexed { index, row ->
+                if (index > 0) {
+                    g.color = THREAD_DIVIDER_COLOR
+                    g.drawLine(x + 12, blockTop - GAP_AFTER_DIVIDER, x + width - 12, blockTop - GAP_AFTER_DIVIDER)
+                }
+                val headerBaseline = blockTop + lineHeight
 
-            g.color = JBColor(Color(45, 47, 52), Color(235, 237, 242))
-            g.font = g.font.deriveFont(Font.BOLD, g.font.size2D)
-            g.drawString(author, bodyX, headerBaseline)
+                if (row.isReplyPrompt) {
+                    g.color = JBColor(Color(55, 110, 190), Color(120, 175, 245))
+                    g.drawLine(x + 19, blockTop + 17, x + 27, blockTop + 17)
+                    g.drawLine(x + 23, blockTop + 13, x + 23, blockTop + 21)
 
-            g.font = g.font.deriveFont(Font.PLAIN, g.font.size2D)
-            g.color = JBColor(Color(55, 110, 190), Color(120, 175, 245))
-            g.drawString("Reply", x + width - 58, headerBaseline)
+                    g.font = g.font.deriveFont(Font.PLAIN, g.font.size2D)
+                    g.drawString(row.label, bodyX, headerBaseline)
+                } else {
+                    g.color = JBColor(Color(100, 105, 115), Color(190, 195, 205))
+                    g.fillOval(x + 15, blockTop + 9, 16, 16)
 
-            g.color = JBColor(Color(65, 67, 73), Color(215, 218, 225))
-            bodyLines.forEachIndexed { index, line ->
-                g.drawString(line, bodyX, headerBaseline + inlay.editor.lineHeight + index * inlay.editor.lineHeight)
+                    g.color = JBColor(Color(45, 47, 52), Color(235, 237, 242))
+                    g.font = g.font.deriveFont(Font.BOLD, g.font.size2D)
+                    g.drawString(row.label, bodyX, headerBaseline)
+
+                    g.font = g.font.deriveFont(Font.PLAIN, g.font.size2D)
+                    g.color = JBColor(Color(65, 67, 73), Color(215, 218, 225))
+                    row.bodyLines.forEachIndexed { lineIndex, line ->
+                        g.drawString(line, bodyX, headerBaseline + lineHeight + lineIndex * lineHeight)
+                    }
+                }
+
+                blockTop += row.heightInLines() * lineHeight + SEPARATOR_GAP
             }
+        }
+
+        companion object {
+            private const val GAP_BEFORE_DIVIDER = 8
+            private const val GAP_AFTER_DIVIDER = 6
+            private const val SEPARATOR_GAP = GAP_BEFORE_DIVIDER + GAP_AFTER_DIVIDER
         }
     }
 }
