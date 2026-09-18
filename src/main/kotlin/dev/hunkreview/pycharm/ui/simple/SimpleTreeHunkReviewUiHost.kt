@@ -34,7 +34,7 @@ import dev.hunkreview.pycharm.model.HunkFileDetail
 import dev.hunkreview.pycharm.model.HunkFileSummary
 import dev.hunkreview.pycharm.model.HunkNote
 import dev.hunkreview.pycharm.model.HunkReview
-import dev.hunkreview.pycharm.model.PYCHARM_COMMENT_PREFIX
+import dev.hunkreview.pycharm.model.HUNK_SOURCE_USER
 import dev.hunkreview.pycharm.ui.HunkReviewUiHost
 import javax.swing.JComponent
 import javax.swing.AbstractAction
@@ -473,14 +473,9 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
     }
 
     private class NoteRenderer(private val note: HunkNote) : EditorCustomElementRenderer {
-        private val isPluginComment = note.body.trimStart().startsWith(PYCHARM_COMMENT_PREFIX)
-        private val isUserReply = note.parentId != null && note.source.lowercase() == "user"
-        private val body = if (isPluginComment) {
-            note.body.trimStart().removePrefix(PYCHARM_COMMENT_PREFIX).trimStart()
-        } else {
-            note.body
-        }
-        private val author = if (isPluginComment || isUserReply) {
+        private val isUserNote = note.source.lowercase() == HUNK_SOURCE_USER
+        private val body = note.body
+        private val author = if (isUserNote) {
             note.author ?: System.getProperty("user.name").orEmpty().ifBlank { "You" }
         } else {
             "AI agent"
@@ -513,13 +508,6 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
             g.font = g.font.deriveFont(Font.PLAIN, g.font.size2D)
             g.color = JBColor(Color(55, 110, 190), Color(120, 175, 245))
             g.drawString("Reply", x + width - 58, headerBaseline)
-
-            if (note.editable) {
-                g.color = JBColor(Color(225, 227, 232), Color(75, 78, 85))
-                g.fillRoundRect(bodyX + g.fontMetrics.stringWidth(author) + 12, y + 7, 62, 20, 5, 5)
-                g.color = JBColor(Color(115, 120, 130), Color(175, 180, 190))
-                g.drawString("PENDING", bodyX + g.fontMetrics.stringWidth(author) + 18, y + 21)
-            }
 
             g.color = JBColor(Color(65, 67, 73), Color(215, 218, 225))
             bodyLines.forEachIndexed { index, line ->

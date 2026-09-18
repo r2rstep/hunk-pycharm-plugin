@@ -1,6 +1,6 @@
 package dev.hunkreview.pycharm.model
 
-const val PYCHARM_COMMENT_PREFIX = "[author:user]"
+const val HUNK_SOURCE_USER = "user"
 
 data class HunkSessionSummary(
     val sessionId: String,

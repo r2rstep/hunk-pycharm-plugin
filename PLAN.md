@@ -22,7 +22,7 @@ Checked with `hunk --version`, `hunk session --help` and children, and by queryi
 - **`session list --json`** returns a cheap per-session skeleton: `sessionId, pid, cwd, repoRoot, launchedAt, terminal.locations[], inputKind, title, sourceLabel, experimentalFeatures, fileCount, files[]` where each file has `id, path, additions, deletions, hunkCount` — no hunk/patch content.
 - **`session review --json`** (verified against the live session) returns `review: { sessionId, title, sourceLabel, cwd, repoRoot, inputKind, experimentalFeatures, selectedFile, selectedHunk, showAgentNotes, liveCommentCount, reviewNoteCount, reviewNotes[] }`. Crucially, **`selectedFile.hunks[]`/`patch` only cover whichever file/hunk is currently focused** — not all files. Full-tree content requires navigating to each file first.
 - `reviewNotes[]` items: `noteId, parentId? (reply), source ("agent"|"user"), filePath, hunkIndex, newRange:[start,count], body, author, createdAt, editable`.
-- **`comment add`** takes one target per call: `(--reply-to <note-id> | --file <path> (--old-line n | --new-line n))` + `--summary` (+ `--rationale`, `--author`, `--markup`, `--focus`).
+- **`comment add`** takes one target per call: `(--reply-to <note-id> | --file <path> (--old-line n | --new-line n))` + `--summary` (+ `--rationale`, `--source`, `--author`, `--markup`, `--focus`). `--source` sets `reviewNotes[].source` directly; the plugin passes `--source user` on every comment/reply it creates.
 - **`comment apply --stdin`** batch shape (from `--help`, verbatim):
   ```json
   {"comments":[
@@ -121,7 +121,7 @@ interface HunkReviewUiHost : Disposable {
 | **0** ✅ | Repo/Gradle scaffold, empty plugin loads | `./gradlew runIde` opens PyCharm Professional sandbox with an empty "Hunk Review" tool window; `./gradlew verifyPlugin` clean; confirm exact product-accessor name (`pycharmProfessional(...)` vs unified `create(...)`) and pty4j visibility via IDE code completion — don't guess from docs |
 | **1** ✅ | CLI bridge + hidden-PTY spawn + pid→sessionId resolution + read-only file tree (plain Swing, no collab-tools) | Action spawns a hidden PTY (`pgrep -af hunk` shows a new pid not attached to a real `/dev/pts/*`); tool window populates from real `session list`/`session review`; process is cleanly killed on project close with nothing orphaned |
 | **2** ◐ | Native PyCharm diff viewer, file/hunk navigation, and hunk-to-terminal synchronization | Native diff rendering, file selection, and hunk selection are implemented and verifier-checked; full collaboration-tools review-host parity remains pending |
-| **3** ✅ | Inline comment authoring, prefixed user comments, inline comment cards, replies, and polling live sync | Gutter `+` opens an inline editor; `Ctrl+Enter` saves; top-level PyCharm comments use `[author:user]` and hide it in the plugin; replies use `--reply-to` without the prefix; end-to-end user/AI reply identity still needs verification |
+| **3** ✅ | Inline comment authoring, `--source user` attribution, inline comment cards, replies, and polling live sync | Gutter `+` opens an inline editor; `Ctrl+Enter` saves; every PyCharm-originated comment/reply is sent with `--source user`, so `reviewNotes[].source` identifies plugin-authored notes directly (no body prefix needed) |
 | **4 (optional)** | VCS Log "Review commit/range with Hunk"; TS push-extension replacing polling | Spike only, not required for a working MVP |
 
 ## Open items to verify once implementation starts

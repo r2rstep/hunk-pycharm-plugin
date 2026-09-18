@@ -54,7 +54,7 @@ class HunkCliInvoker(private val binaryPath: String) {
         run("session", "navigate", sessionId, "--file", filePath, "--hunk", (hunkIndex + 1).toString())
     }
 
-    fun addComment(sessionId: String, filePath: String, line: Int, oldLine: Boolean, summary: String, rationale: String?) {
+    fun addComment(sessionId: String, filePath: String, line: Int, oldLine: Boolean, summary: String, rationale: String?, source: String? = null) {
         buildList {
             add("session"); add("comment"); add("add"); add(sessionId)
             add("--file"); add(filePath)
@@ -63,16 +63,22 @@ class HunkCliInvoker(private val binaryPath: String) {
             if (!rationale.isNullOrBlank()) {
                 add("--rationale"); add(rationale)
             }
+            if (!source.isNullOrBlank()) {
+                add("--source"); add(source)
+            }
         }.let { run(*it.toTypedArray()) }
     }
 
-    fun addReply(sessionId: String, noteId: String, summary: String, rationale: String?) {
+    fun addReply(sessionId: String, noteId: String, summary: String, rationale: String?, source: String? = null) {
         buildList {
             add("session"); add("comment"); add("add"); add(sessionId)
             add("--reply-to"); add(noteId)
             add("--summary"); add(summary)
             if (!rationale.isNullOrBlank()) {
                 add("--rationale"); add(rationale)
+            }
+            if (!source.isNullOrBlank()) {
+                add("--source"); add(source)
             }
         }.let { run(*it.toTypedArray()) }
     }

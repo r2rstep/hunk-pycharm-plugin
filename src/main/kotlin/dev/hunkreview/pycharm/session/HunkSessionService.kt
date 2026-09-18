@@ -12,7 +12,7 @@ import com.pty4j.PtyProcess
 import dev.hunkreview.pycharm.cli.HunkCliInvoker
 import dev.hunkreview.pycharm.cli.HunkCliLocator
 import dev.hunkreview.pycharm.ui.HunkReviewUiHost
-import dev.hunkreview.pycharm.model.PYCHARM_COMMENT_PREFIX
+import dev.hunkreview.pycharm.model.HUNK_SOURCE_USER
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -144,7 +144,7 @@ class HunkSessionService(private val project: Project) : Disposable {
         val id = sessionId ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                invoker?.addComment(id, path, line, oldLine, "$PYCHARM_COMMENT_PREFIX $summary", rationale)
+                invoker?.addComment(id, path, line, oldLine, summary, rationale, source = HUNK_SOURCE_USER)
                 refreshNotes(id)
             } catch (e: Exception) {
                 log.warn("Failed to add comment to '$path' hunk $hunkIndex", e)
@@ -156,7 +156,7 @@ class HunkSessionService(private val project: Project) : Disposable {
         val id = sessionId ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                invoker?.addReply(id, noteId, summary, rationale)
+                invoker?.addReply(id, noteId, summary, rationale, source = HUNK_SOURCE_USER)
                 refreshNotes(id)
             } catch (e: Exception) {
                 log.warn("Failed to add reply to comment $noteId", e)
