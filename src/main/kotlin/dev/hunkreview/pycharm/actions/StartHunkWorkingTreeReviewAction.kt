@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
 import dev.hunkreview.pycharm.session.HunkSessionService
+import dev.hunkreview.pycharm.settings.HunkPluginSettings
 
 class StartHunkWorkingTreeReviewAction : AnAction() {
 
@@ -22,6 +23,19 @@ class StartHunkWorkingTreeReviewAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project: Project = e.project ?: return
+        val settings = HunkPluginSettings.getInstance()
+
+        val comparisonRef = Messages.showInputDialog(
+            project,
+            "Branch, commit, or range to compare the working tree against:",
+            "Start Hunk Review",
+            null,
+            settings.lastComparisonRef,
+            null
+        ) ?: return
+        if (comparisonRef.isBlank()) return
+        settings.lastComparisonRef = comparisonRef
+
         val service = project.getService(HunkSessionService::class.java)
 
         // Open the tool window immediately so the command-palette action has
@@ -29,6 +43,7 @@ class StartHunkWorkingTreeReviewAction : AnAction() {
         showReviewToolWindow(project)
 
         service.startWorkingTreeReview(
+            comparisonRef = comparisonRef,
             onReady = { sessionId ->
                 log.info("Hunk session ready: $sessionId")
                 showReviewToolWindow(project)

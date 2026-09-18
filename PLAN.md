@@ -131,8 +131,6 @@ interface HunkReviewUiHost : Disposable {
 3. Whether `com.intellij.collaboration.ui` classes used in Phase 2 trip `verifyPlugin`'s internal-API warnings.
 4. Exact IntelliJ Platform Gradle Plugin 2.x accessor for "PyCharm Professional" given signs of a 2025.3+ IU/PY product unification.
 5. Minimum `hunk` version to require in `HunkCliLocator` (0.22.0 confirmed to have the full `session` family; re-check the changelog immediately before coding, since the CLI is pre-1.0 and this surface is actively moving).
-6. Replace the Phase-1 hard-coded `hunk diff master` target with a client-selectable comparison ref (branch, commit, or range), exposed through the action or plugin settings. The current MVP uses `master` so staged and unstaged changes are reviewed together.
-7. Verify replying to comments created by both a user and an AI agent: PyCharm-created replies must remain unprefixed, user replies must render with the user identity, and unprefixed AI replies must render as `AI agent`.
 
 ## Environment note
 

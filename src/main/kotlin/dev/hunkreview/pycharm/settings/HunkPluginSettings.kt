@@ -13,7 +13,8 @@ class HunkPluginSettings : PersistentStateComponent<HunkPluginSettings.State> {
 
     data class State(
         var cliPath: String? = null,
-        var pollIntervalMs: Long = 2500L
+        var pollIntervalMs: Long = 2500L,
+        var lastComparisonRef: String = DEFAULT_COMPARISON_REF
     )
 
     private var state = State()
@@ -26,6 +27,10 @@ class HunkPluginSettings : PersistentStateComponent<HunkPluginSettings.State> {
         get() = state.pollIntervalMs
         set(value) { state.pollIntervalMs = value }
 
+    var lastComparisonRef: String
+        get() = state.lastComparisonRef
+        set(value) { state.lastComparisonRef = value }
+
     override fun getState(): State = state
 
     override fun loadState(loadedState: State) {
@@ -33,6 +38,7 @@ class HunkPluginSettings : PersistentStateComponent<HunkPluginSettings.State> {
     }
 
     companion object {
+        const val DEFAULT_COMPARISON_REF = "master"
         fun getInstance(): HunkPluginSettings = service()
     }
 }

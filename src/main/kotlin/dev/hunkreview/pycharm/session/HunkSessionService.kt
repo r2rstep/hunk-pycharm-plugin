@@ -58,7 +58,7 @@ class HunkSessionService(private val project: Project) : Disposable {
         uiHost = null
     }
 
-    fun startWorkingTreeReview(onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
+    fun startWorkingTreeReview(comparisonRef: String, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
         try {
             stopIfRunning()
 
@@ -67,11 +67,9 @@ class HunkSessionService(private val project: Project) : Disposable {
             invoker = cliInvoker
 
             val basePath = project.basePath ?: error("Project has no base path")
-            // Temporary MVP behavior: compare the current checkout with
-            // master so both staged and unstaged changes are included. The
-            // target branch/commit should become an action or settings option
-            // in a later iteration; see PLAN.md.
-            val process = launcher.launch(binaryPath, File(basePath), listOf("diff", "master"))
+            // Comparing against comparisonRef (rather than diffing only the
+            // index) surfaces both staged and unstaged changes in one review.
+            val process = launcher.launch(binaryPath, File(basePath), listOf("diff", comparisonRef))
             ptyProcess = process
 
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Starting Hunk review", false) {
