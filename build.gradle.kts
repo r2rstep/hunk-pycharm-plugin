@@ -59,10 +59,10 @@ java {
 }
 
 kotlin {
-    // Only JDK 26 is installed locally (no toolchain download resolver is
-    // configured), so run the compiler on 26 while still emitting Java 25
+    // Only JDK 27 is installed locally (no toolchain download resolver is
+    // configured), so run the compiler on 27 while still emitting Java 25
     // bytecode via jvmTarget below - the JDK just needs to be >= the target.
-    jvmToolchain(26)
+    jvmToolchain(27)
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_25)
     }

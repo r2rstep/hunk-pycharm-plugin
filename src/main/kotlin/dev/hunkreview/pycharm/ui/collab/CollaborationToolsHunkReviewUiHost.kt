@@ -8,6 +8,7 @@ import com.intellij.collaboration.ui.codereview.diff.EditorComponentInlaysManage
 import com.intellij.collaboration.ui.codereview.timeline.thread.TimelineThreadCommentsPanel
 import com.intellij.diff.DiffRequestPanel
 import com.intellij.diff.impl.DiffRequestPanelImpl
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -27,6 +28,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
+import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
@@ -40,6 +42,8 @@ import dev.hunkreview.pycharm.ui.HunkReviewUiHost
 import dev.hunkreview.pycharm.ui.simple.HunkPatchDiffContentBuilder
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Graphics
@@ -55,7 +59,6 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.JSplitPane
 import javax.swing.JTree
 import javax.swing.KeyStroke
 import javax.swing.tree.DefaultMutableTreeNode
@@ -106,15 +109,44 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     private val commentInlayManagers = mutableListOf<EditorComponentInlaysManager>()
     private val gutterBindings = mutableListOf<Pair<javax.swing.JComponent, MouseInputAdapter>>()
 
-    val component: JComponent = JSplitPane(
-        JSplitPane.HORIZONTAL_SPLIT,
-        JBScrollPane(tree),
-        JPanel(BorderLayout()).apply {
+    private var filesListExpandedProportion = 0.32f
+    private var filesListCollapsed = false
+    private val treeScrollPane = JBScrollPane(tree)
+    private val collapseFilesListButton = JButton(AllIcons.General.ChevronLeft).apply {
+        isFocusable = false
+        isBorderPainted = false
+        isContentAreaFilled = false
+        isOpaque = false
+        margin = JBUI.emptyInsets()
+        // Pin the size instead of letting the L&F's button chrome grow the
+        // preferred size past the collapsed strip's width, which was
+        // clipping the icon down to a sliver.
+        preferredSize = Dimension(24, 24)
+        minimumSize = Dimension(24, 24)
+        toolTipText = "Collapse file list"
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        addActionListener { toggleFilesListCollapsed() }
+    }
+    private val filesListPanel = JPanel(BorderLayout()).apply {
+        add(JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(2, 0)
+            add(collapseFilesListButton, BorderLayout.EAST)
+        }, BorderLayout.NORTH)
+        add(treeScrollPane, BorderLayout.CENTER)
+    }
+
+    // OnePixelSplitter (not JSplitPane) renders a theme-aware 1px divider;
+    // the default Swing JSplitPane divider ignores Darcula and stays bright.
+    private val splitter = OnePixelSplitter(false, filesListExpandedProportion).apply {
+        setHonorComponentsMinimumSize(true)
+        firstComponent = filesListPanel
+        secondComponent = JPanel(BorderLayout()).apply {
             add(diffPanel.component, BorderLayout.CENTER)
         }
-    ).apply {
-        resizeWeight = 0.32
     }
+
+    val component: JComponent = splitter
 
     init {
         tree.selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
@@ -140,6 +172,27 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
                 is HunkFileSummary -> fileSelectedHandler?.invoke(userObject.path)
             }
         }
+    }
+
+    private fun toggleFilesListCollapsed() {
+        filesListCollapsed = !filesListCollapsed
+        if (filesListCollapsed) {
+            filesListExpandedProportion = splitter.proportion
+            treeScrollPane.isVisible = false
+            // Wide enough for the pinned 24x24 collapse/expand button plus margin.
+            filesListPanel.minimumSize = Dimension(30, 0)
+            splitter.proportion = 0f
+            collapseFilesListButton.icon = AllIcons.General.ChevronRight
+            collapseFilesListButton.toolTipText = "Expand file list"
+        } else {
+            treeScrollPane.isVisible = true
+            filesListPanel.minimumSize = null
+            splitter.proportion = filesListExpandedProportion
+            collapseFilesListButton.icon = AllIcons.General.ChevronLeft
+            collapseFilesListButton.toolTipText = "Collapse file list"
+        }
+        splitter.revalidate()
+        splitter.repaint()
     }
 
     override fun render(review: HunkReview, files: List<HunkFileSummary>) {
