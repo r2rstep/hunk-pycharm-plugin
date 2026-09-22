@@ -34,5 +34,11 @@
                 description="Review the selected commit or commit range with Hunk and open it in the Hunk Review tool window">
             <add-to-group group-id="Vcs.Log.ContextMenu" anchor="first"/>
         </action>
+        <action id="Hunk.ReviewChangelistWithHunk"
+                class="dev.hunkreview.pycharm.actions.ReviewChangelistWithHunkAction"
+                text="Review Changelist with Hunk"
+                description="Review the selected changelist's files with Hunk and open it in the Hunk Review tool window">
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="first"/>
+        </action>
     </actions>
 </idea-plugin>

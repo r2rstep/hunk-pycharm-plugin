@@ -74,6 +74,11 @@ class HunkSessionService(private val project: Project) : Disposable {
         startReview(listOf("diff", baseRevision, headRevision), onReady, onError)
     }
 
+    /** Commit panel "Review changelist with Hunk" - reviews only the given (repo-relative) paths. */
+    fun startChangelistReview(paths: List<String>, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
+        startReview(listOf("diff", "--") + paths, onReady, onError)
+    }
+
     private fun startReview(args: List<String>, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
         try {
             stopIfRunning()
