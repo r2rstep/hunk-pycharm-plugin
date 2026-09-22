@@ -59,6 +59,22 @@ class HunkSessionService(private val project: Project) : Disposable {
     }
 
     fun startWorkingTreeReview(comparisonRef: String, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
+        // Comparing against comparisonRef (rather than diffing only the
+        // index) surfaces both staged and unstaged changes in one review.
+        startReview(listOf("diff", comparisonRef), onReady, onError)
+    }
+
+    /** Phase 4: VCS Log "Review commit with Hunk" - reviews a single commit. */
+    fun startCommitReview(revision: String, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
+        startReview(listOf("show", revision), onReady, onError)
+    }
+
+    /** Phase 4: VCS Log "Review commit range with Hunk" - reviews the diff between two commits. */
+    fun startRangeReview(baseRevision: String, headRevision: String, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
+        startReview(listOf("diff", baseRevision, headRevision), onReady, onError)
+    }
+
+    private fun startReview(args: List<String>, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
         try {
             stopIfRunning()
 
@@ -67,9 +83,7 @@ class HunkSessionService(private val project: Project) : Disposable {
             invoker = cliInvoker
 
             val basePath = project.basePath ?: error("Project has no base path")
-            // Comparing against comparisonRef (rather than diffing only the
-            // index) surfaces both staged and unstaged changes in one review.
-            val process = launcher.launch(binaryPath, File(basePath), listOf("diff", comparisonRef))
+            val process = launcher.launch(binaryPath, File(basePath), args)
             ptyProcess = process
 
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Starting Hunk review", false) {

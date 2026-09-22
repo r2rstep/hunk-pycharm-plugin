@@ -28,5 +28,11 @@
                 description="Start a Hunk review of the working tree and open it in the Hunk Review tool window">
             <add-to-group group-id="Git.Menu" anchor="first"/>
         </action>
+        <action id="Hunk.ReviewCommitWithHunk"
+                class="dev.hunkreview.pycharm.actions.ReviewCommitWithHunkAction"
+                text="Review with Hunk"
+                description="Review the selected commit or commit range with Hunk and open it in the Hunk Review tool window">
+            <add-to-group group-id="Vcs.Log.ContextMenu" anchor="first"/>
+        </action>
     </actions>
 </idea-plugin>

@@ -41,6 +41,12 @@ dependencies {
         bundledModule("intellij.platform.vcs.impl")
         bundledModule("intellij.platform.collaborationTools")
 
+        // VcsLogDataKeys/VcsLog, used by the Phase 4 "Review commit/range
+        // with Hunk" VCS Log context menu action. vcs.log.graph carries
+        // GraphCommit, a supertype in VcsCommitMetadata's hierarchy.
+        bundledModule("intellij.platform.vcs.log")
+        bundledModule("intellij.platform.vcs.log.graph")
+
     }
 
     implementation(libs.kotlinx.serialization.json)

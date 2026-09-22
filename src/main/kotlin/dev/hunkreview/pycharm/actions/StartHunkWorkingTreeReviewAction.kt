@@ -7,7 +7,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.wm.ToolWindowManager
 import dev.hunkreview.pycharm.session.HunkSessionService
 import dev.hunkreview.pycharm.settings.HunkPluginSettings
 
@@ -40,13 +39,13 @@ class StartHunkWorkingTreeReviewAction : AnAction() {
 
         // Open the tool window immediately so the command-palette action has
         // visible feedback while Hunk starts and the daemon registers it.
-        showReviewToolWindow(project)
+        showHunkReviewToolWindow(project)
 
         service.startWorkingTreeReview(
             comparisonRef = comparisonRef,
             onReady = { sessionId ->
                 log.info("Hunk session ready: $sessionId")
-                showReviewToolWindow(project)
+                showHunkReviewToolWindow(project)
             },
             onError = { error ->
                 log.warn("Failed to start Hunk review", error)
@@ -55,18 +54,5 @@ class StartHunkWorkingTreeReviewAction : AnAction() {
                 }
             }
         )
-    }
-
-    private fun showReviewToolWindow(project: Project) {
-        ApplicationManager.getApplication().invokeLater {
-            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Hunk Review")
-            if (toolWindow == null) {
-                log.warn("Hunk Review tool window is not registered")
-                return@invokeLater
-            }
-            toolWindow.show {
-                toolWindow.activate(null)
-            }
-        }
     }
 }
