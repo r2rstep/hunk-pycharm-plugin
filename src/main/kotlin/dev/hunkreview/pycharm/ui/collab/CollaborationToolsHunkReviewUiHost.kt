@@ -33,6 +33,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.tree.TreeUtil
 import dev.hunkreview.pycharm.model.HUNK_SOURCE_USER
 import dev.hunkreview.pycharm.model.HunkFileDetail
 import dev.hunkreview.pycharm.model.HunkFileSummary
@@ -56,9 +57,11 @@ import java.nio.file.Paths
 import javax.swing.AbstractAction
 import javax.swing.Icon
 import javax.swing.JButton
+import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.KeyStroke
 import javax.swing.tree.DefaultMutableTreeNode
@@ -111,6 +114,8 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
 
     private var filesListExpandedProportion = 0.32f
     private var filesListCollapsed = false
+    private var groupByDirectory = false
+    private var currentFiles: List<HunkFileSummary> = emptyList()
     private val treeScrollPane = JBScrollPane(tree)
     private val collapseFilesListButton = JButton(AllIcons.General.ChevronLeft).apply {
         isFocusable = false
@@ -127,10 +132,23 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         addActionListener { toggleFilesListCollapsed() }
     }
+    private val groupByButton = JButton(AllIcons.Actions.GroupBy).apply {
+        isFocusable = false
+        isBorderPainted = false
+        isContentAreaFilled = false
+        isOpaque = false
+        margin = JBUI.emptyInsets()
+        preferredSize = Dimension(24, 24)
+        minimumSize = Dimension(24, 24)
+        toolTipText = "Group By"
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        addActionListener { showGroupByPopup(this) }
+    }
     private val filesListPanel = JPanel(BorderLayout()).apply {
         add(JPanel(BorderLayout()).apply {
             isOpaque = false
             border = JBUI.Borders.empty(2, 0)
+            add(groupByButton, BorderLayout.WEST)
             add(collapseFilesListButton, BorderLayout.EAST)
         }, BorderLayout.NORTH)
         add(treeScrollPane, BorderLayout.CENTER)
@@ -162,7 +180,14 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
                 hasFocus: Boolean
             ) {
                 when (val userObject = (value as? DefaultMutableTreeNode)?.userObject) {
-                    is HunkFileSummary -> append("${userObject.path}  (+${userObject.additions} -${userObject.deletions})")
+                    is HunkFileSummary -> {
+                        val displayPath = if (groupByDirectory) userObject.path.substringAfterLast('/') else userObject.path
+                        append("$displayPath  (+${userObject.additions} -${userObject.deletions})")
+                    }
+                    is DirectoryNode -> {
+                        icon = AllIcons.Nodes.Folder
+                        append(userObject.name)
+                    }
                     else -> append(userObject?.toString().orEmpty())
                 }
             }
@@ -179,6 +204,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         if (filesListCollapsed) {
             filesListExpandedProportion = splitter.proportion
             treeScrollPane.isVisible = false
+            groupByButton.isVisible = false
             // Wide enough for the pinned 24x24 collapse/expand button plus margin.
             filesListPanel.minimumSize = Dimension(30, 0)
             splitter.proportion = 0f
@@ -186,6 +212,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
             collapseFilesListButton.toolTipText = "Expand file list"
         } else {
             treeScrollPane.isVisible = true
+            groupByButton.isVisible = true
             filesListPanel.minimumSize = null
             splitter.proportion = filesListExpandedProportion
             collapseFilesListButton.icon = AllIcons.General.ChevronLeft
@@ -195,15 +222,60 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         splitter.repaint()
     }
 
+    private fun showGroupByPopup(invoker: JComponent) {
+        val directoryItem = JCheckBoxMenuItem("Directory", groupByDirectory)
+        directoryItem.addActionListener {
+            groupByDirectory = directoryItem.isSelected
+            rebuildFileTree()
+        }
+        JPopupMenu().apply { add(directoryItem) }.show(invoker, 0, invoker.height)
+    }
+
     override fun render(review: HunkReview, files: List<HunkFileSummary>) {
-        rootNode.removeAllChildren()
         rootNode.userObject = review.title ?: review.sessionId
         currentFileDetail = null
         currentNotes = emptyList()
         selectedLine = null
         lineMap = null
-        files.forEach { file -> rootNode.add(DefaultMutableTreeNode(file)) }
+        currentFiles = files
+        rebuildFileTree()
+    }
+
+    private fun rebuildFileTree() {
+        rootNode.removeAllChildren()
+        if (groupByDirectory) {
+            buildDirectoryNodes(currentFiles).forEach { rootNode.add(it) }
+        } else {
+            currentFiles.forEach { file -> rootNode.add(DefaultMutableTreeNode(file)) }
+        }
         treeModel.reload()
+        if (groupByDirectory) {
+            TreeUtil.expandAll(tree)
+        }
+    }
+
+    /** Nests files under their containing directories, mirroring the platform Commit view's "Group by Directory". */
+    private fun buildDirectoryNodes(files: List<HunkFileSummary>): List<DefaultMutableTreeNode> {
+        val dirNodes = mutableMapOf<String, DefaultMutableTreeNode>()
+        val topLevel = mutableListOf<DefaultMutableTreeNode>()
+        files.sortedBy { it.path }.forEach { file ->
+            val segments = file.path.split('/')
+            var parent: DefaultMutableTreeNode? = null
+            var pathSoFar = ""
+            for (i in 0 until segments.size - 1) {
+                pathSoFar = if (pathSoFar.isEmpty()) segments[i] else "$pathSoFar/${segments[i]}"
+                val currentParent = parent
+                val node = dirNodes.getOrPut(pathSoFar) {
+                    val newNode = DefaultMutableTreeNode(DirectoryNode(segments[i]))
+                    if (currentParent == null) topLevel += newNode else currentParent.add(newNode)
+                    newNode
+                }
+                parent = node
+            }
+            val fileNode = DefaultMutableTreeNode(file)
+            if (parent == null) topLevel += fileNode else parent.add(fileNode)
+        }
+        return topLevel
     }
 
     override fun showFileLoading(path: String) {
@@ -290,6 +362,8 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     }
 
     private data class SelectedLine(val line: Int, val hunkIndex: Int, val oldLine: Boolean)
+
+    private data class DirectoryNode(val name: String)
 
     private fun installDiffBindings(detail: HunkFileDetail) {
         ApplicationManager.getApplication().invokeLater {
