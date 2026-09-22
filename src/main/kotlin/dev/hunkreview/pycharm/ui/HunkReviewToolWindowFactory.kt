@@ -7,12 +7,12 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import dev.hunkreview.pycharm.session.HunkSessionService
-import dev.hunkreview.pycharm.ui.simple.SimpleTreeHunkReviewUiHost
+import dev.hunkreview.pycharm.ui.collab.CollaborationToolsHunkReviewUiHost
 
 class HunkReviewToolWindowFactory : ToolWindowFactory {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        val uiHost = SimpleTreeHunkReviewUiHost(project)
+        val uiHost = CollaborationToolsHunkReviewUiHost(project)
         val service = project.getService(HunkSessionService::class.java)
 
         uiHost.onFileSelected { path -> service.selectFile(path) }
