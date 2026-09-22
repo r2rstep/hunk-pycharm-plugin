@@ -93,7 +93,6 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     private var commentRequestedHandler: ((String, Int, Int, Boolean, String, String?) -> Unit)? = null
     private var replyRequestedHandler: ((String, String, String?) -> Unit)? = null
     private var currentFileDetail: HunkFileDetail? = null
-    private var selectedHunkIndex: Int? = null
     private var selectedLine: SelectedLine? = null
     private var lineMap: HunkPatchDiffContentBuilder.LineMap? = null
     private var currentNotes: List<HunkNote> = emptyList()
@@ -132,7 +131,6 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
             ) {
                 when (val userObject = (value as? DefaultMutableTreeNode)?.userObject) {
                     is HunkFileSummary -> append("${userObject.path}  (+${userObject.additions} -${userObject.deletions})")
-                    is HunkTreeItem -> append("Hunk ${userObject.index + 1}")
                     else -> append(userObject?.toString().orEmpty())
                 }
             }
@@ -140,11 +138,6 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         tree.addTreeSelectionListener {
             when (val userObject = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject) {
                 is HunkFileSummary -> fileSelectedHandler?.invoke(userObject.path)
-                is HunkTreeItem -> {
-                    showHunk(userObject.index)
-                    selectedHunkIndex = userObject.index
-                    hunkSelectedHandler?.invoke(userObject.path, userObject.index)
-                }
             }
         }
     }
@@ -154,7 +147,6 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         rootNode.userObject = review.title ?: review.sessionId
         currentFileDetail = null
         currentNotes = emptyList()
-        selectedHunkIndex = null
         selectedLine = null
         lineMap = null
         files.forEach { file -> rootNode.add(DefaultMutableTreeNode(file)) }
@@ -164,7 +156,6 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     override fun showFileLoading(path: String) {
         currentFileDetail = null
         currentNotes = emptyList()
-        selectedHunkIndex = null
         selectedLine = null
         lineMap = null
         clearDiffBindings()
@@ -173,21 +164,10 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
 
     override fun renderFile(detail: HunkFileDetail) {
         currentFileDetail = detail
-        selectedHunkIndex = null
         selectedLine = null
         lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return))
         diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return)))
         installDiffBindings(detail)
-        val fileNode = (0 until rootNode.childCount)
-            .map { rootNode.getChildAt(it) as DefaultMutableTreeNode }
-            .firstOrNull { (it.userObject as? HunkFileSummary)?.path == detail.path }
-            ?: return
-        fileNode.removeAllChildren()
-        detail.hunks.forEach { hunk ->
-            fileNode.add(DefaultMutableTreeNode(HunkTreeItem(detail.path, hunk.index)))
-        }
-        treeModel.reload(fileNode)
-        tree.expandPath(javax.swing.tree.TreePath(fileNode.path))
     }
 
     override fun updateNotes(notes: List<HunkNote>) {
@@ -256,20 +236,9 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         diffPanel.dispose()
     }
 
-    private data class HunkTreeItem(val path: String, val index: Int)
     private data class SelectedLine(val line: Int, val hunkIndex: Int, val oldLine: Boolean)
 
-    private fun showHunk(index: Int) {
-        currentFileDetail?.let { detail ->
-            selectedHunkIndex = index
-            lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return), index)
-            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), index))
-            clearDiffBindings()
-            installDiffBindings(detail, index)
-        }
-    }
-
-    private fun installDiffBindings(detail: HunkFileDetail, selectedHunk: Int? = null) {
+    private fun installDiffBindings(detail: HunkFileDetail) {
         ApplicationManager.getApplication().invokeLater {
             val editors = EditorFactory.getInstance().allEditors.filter {
                 isDescendant(it.component, diffPanel.component)
