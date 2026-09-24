@@ -3,6 +3,8 @@ package dev.hunkreview.pycharm.ui.simple
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.contents.DiffContent
 import com.intellij.diff.requests.SimpleDiffRequest
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diff.impl.patch.PatchHunk
 import com.intellij.openapi.diff.impl.patch.PatchLine
 import com.intellij.openapi.diff.impl.patch.PatchReader
@@ -22,16 +24,23 @@ object HunkPatchDiffContentBuilder {
     fun lineMap(detail: HunkFileDetail, basePath: Path, selectedHunkIndex: Int? = null): LineMap? =
         render(detail, basePath, selectedHunkIndex)?.let { LineMap(it.beforeAnchors, it.afterAnchors) }
 
-    fun build(detail: HunkFileDetail, basePath: Path, selectedHunkIndex: Int? = null): SimpleDiffRequest? {
+    fun build(detail: HunkFileDetail, basePath: Path, project: Project, selectedHunkIndex: Int? = null): SimpleDiffRequest? {
         val rendered = render(detail, basePath, selectedHunkIndex) ?: return null
         val contentFactory = DiffContentFactory.getInstance()
+        val sourcePath = basePath.resolve(detail.path).normalize()
+        val fileSystem = LocalFileSystem.getInstance()
+        val sourceFile = fileSystem.findFileByNioFile(sourcePath)
+            ?: fileSystem.refreshAndFindFileByNioFile(sourcePath)
+        // Keep the before side detached so Go to Source maps its caret through the diff to the working file.
         val before: DiffContent = rendered.beforeText
             .takeUnless(String::isEmpty)
             ?.let(contentFactory::create)
             ?: contentFactory.createEmpty()
         val after: DiffContent = rendered.afterText
             .takeUnless(String::isEmpty)
-            ?.let(contentFactory::create)
+            ?.let { text ->
+                sourceFile?.let { contentFactory.create(project, text, it) } ?: contentFactory.create(text)
+            }
             ?: contentFactory.createEmpty()
         return SimpleDiffRequest(detail.path, before, after, "Before", "After")
     }

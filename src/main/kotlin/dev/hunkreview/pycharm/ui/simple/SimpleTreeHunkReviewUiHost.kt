@@ -160,7 +160,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         selectedHunkIndex = null
         selectedLine = null
         lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return))
-        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return)))
+        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project))
         installDiffBindings(detail)
         val fileNode = (0 until rootNode.childCount)
             .map { rootNode.getChildAt(it) as DefaultMutableTreeNode }
@@ -232,7 +232,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         currentFileDetail?.let { detail ->
             selectedHunkIndex = index
             lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return), index)
-            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), index))
+            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project, index))
             clearDiffBindings()
             installDiffBindings(detail, index)
         }

@@ -32,6 +32,7 @@ import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
 import dev.hunkreview.pycharm.model.HUNK_SOURCE_USER
@@ -64,8 +65,10 @@ import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.KeyStroke
+import javax.swing.SwingConstants
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -116,6 +119,13 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     private var filesListCollapsed = false
     private var groupByDirectory = false
     private var currentFiles: List<HunkFileSummary> = emptyList()
+    private var selectedFilePath: String? = null
+    private var restoringFileSelection = false
+    private val selectedFileLabel = JLabel("Select a file").apply {
+        horizontalAlignment = SwingConstants.CENTER
+        font = font.deriveFont(Font.BOLD)
+        border = JBUI.Borders.empty(6, 10)
+    }
     private val treeScrollPane = JBScrollPane(tree)
     private val collapseFilesListButton = JButton(AllIcons.General.ChevronLeft).apply {
         isFocusable = false
@@ -160,6 +170,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         setHonorComponentsMinimumSize(true)
         firstComponent = filesListPanel
         secondComponent = JPanel(BorderLayout()).apply {
+            add(selectedFileLabel, BorderLayout.NORTH)
             add(diffPanel.component, BorderLayout.CENTER)
         }
     }
@@ -167,6 +178,12 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     val component: JComponent = splitter
 
     init {
+        ReviewDiffNavigation.install(diffPanel, { nextReviewFilePath() }) { path ->
+            selectedFilePath = path
+            updateSelectedFileLabel(path)
+            restoreFileSelection()
+            fileSelectedHandler?.invoke(path)
+        }
         tree.selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
         tree.isRootVisible = true
         tree.cellRenderer = object : ColoredTreeCellRenderer() {
@@ -193,8 +210,13 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
             }
         }
         tree.addTreeSelectionListener {
+            if (restoringFileSelection) return@addTreeSelectionListener
             when (val userObject = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject) {
-                is HunkFileSummary -> fileSelectedHandler?.invoke(userObject.path)
+                is HunkFileSummary -> {
+                    selectedFilePath = userObject.path
+                    updateSelectedFileLabel(userObject.path)
+                    fileSelectedHandler?.invoke(userObject.path)
+                }
             }
         }
     }
@@ -234,6 +256,8 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     override fun render(review: HunkReview, files: List<HunkFileSummary>) {
         rootNode.userObject = review.title ?: review.sessionId
         currentFileDetail = null
+        selectedFilePath = null
+        updateSelectedFileLabel(null)
         currentNotes = emptyList()
         selectedLine = null
         lineMap = null
@@ -251,6 +275,50 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         treeModel.reload()
         if (groupByDirectory) {
             TreeUtil.expandAll(tree)
+        }
+        restoreFileSelection()
+    }
+
+    private fun nextReviewFilePath(): String? {
+        val detail = currentFileDetail ?: return null
+        if (detail.path != selectedFilePath || detail.hunks.isEmpty()) return null
+        val paths = mutableListOf<String>()
+        fun collect(node: DefaultMutableTreeNode) {
+            val file = node.userObject as? HunkFileSummary
+            if (file != null) {
+                if (file.hunkCount > 0) paths += file.path
+                return
+            }
+            for (index in 0 until node.childCount) collect(node.getChildAt(index) as DefaultMutableTreeNode)
+        }
+        collect(rootNode)
+        val currentIndex = paths.indexOf(detail.path)
+        if (currentIndex < 0) return null
+        return paths.getOrNull(currentIndex + 1)
+    }
+
+    private fun updateSelectedFileLabel(path: String?) {
+        selectedFileLabel.text = path?.substringAfterLast('/') ?: "Select a file"
+        selectedFileLabel.toolTipText = path
+    }
+
+    private fun restoreFileSelection() {
+        val path = selectedFilePath ?: return
+        fun findFile(node: DefaultMutableTreeNode): DefaultMutableTreeNode? {
+            if ((node.userObject as? HunkFileSummary)?.path == path) return node
+            for (index in 0 until node.childCount) {
+                findFile(node.getChildAt(index) as DefaultMutableTreeNode)?.let { return it }
+            }
+            return null
+        }
+        val fileNode = findFile(rootNode) ?: return
+        val treePath = TreePath(fileNode.path)
+        if (tree.selectionPath == treePath) return
+        restoringFileSelection = true
+        try {
+            tree.selectionPath = treePath
+        } finally {
+            restoringFileSelection = false
         }
     }
 
@@ -279,6 +347,9 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     }
 
     override fun showFileLoading(path: String) {
+        selectedFilePath = path
+        updateSelectedFileLabel(path)
+        restoreFileSelection()
         currentFileDetail = null
         currentNotes = emptyList()
         selectedLine = null
@@ -288,10 +359,15 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     }
 
     override fun renderFile(detail: HunkFileDetail) {
+        selectedFilePath = detail.path
+        updateSelectedFileLabel(detail.path)
+        restoreFileSelection()
         currentFileDetail = detail
         selectedLine = null
         lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return))
-        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return)))
+        val request = HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project)
+        request?.putUserData(DiffUserDataKeysEx.SCROLL_TO_CHANGE, DiffUserDataKeysEx.ScrollToPolicy.FIRST_CHANGE)
+        diffPanel.setRequest(request)
         installDiffBindings(detail)
     }
 
