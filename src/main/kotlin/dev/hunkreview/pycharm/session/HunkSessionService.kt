@@ -74,9 +74,15 @@ class HunkSessionService(private val project: Project) : Disposable {
         startReview(listOf("diff", baseRevision, headRevision), onReady, onError)
     }
 
-    /** Commit panel "Review changelist with Hunk" - reviews only the given (repo-relative) paths. */
+    /**
+     * Commit panel "Review changelist with Hunk" - reviews only the given
+     * (repo-relative) paths. Diffs explicitly against HEAD (rather than
+     * omitting the ref, which falls back to index-vs-worktree like plain
+     * `git diff`) so a new file that has already been staged is still shown
+     * as newly added instead of as a modification of its staged content.
+     */
     fun startChangelistReview(paths: List<String>, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {
-        startReview(listOf("diff", "--") + paths, onReady, onError)
+        startReview(listOf("diff", "HEAD", "--") + paths, onReady, onError)
     }
 
     private fun startReview(args: List<String>, onReady: (String) -> Unit, onError: (Throwable) -> Unit) {

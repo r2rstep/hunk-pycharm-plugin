@@ -1,6 +1,7 @@
 package dev.hunkreview.pycharm.ui.simple
 
 import com.intellij.diff.DiffRequestPanel
+import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.impl.DiffRequestPanelImpl
 import com.intellij.openapi.project.Project
 import com.intellij.ui.ColoredTreeCellRenderer
@@ -81,7 +82,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
     private var selectedLine: SelectedLine? = null
     private var lineMap: HunkPatchDiffContentBuilder.LineMap? = null
     private var currentNotes: List<HunkNote> = emptyList()
-    private val installedEditors = mutableListOf<Editor>()
+    private val editorsBySide = mutableMapOf<HunkPatchDiffContentBuilder.Side, Editor>()
     private val selectionBindings = mutableListOf<Pair<Editor, SelectionListener>>()
     private val noteInlays = mutableListOf<Inlay<*>>()
     private val noteInlayTargets = mutableMapOf<Inlay<*>, HunkNote>()
@@ -160,8 +161,9 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         selectedHunkIndex = null
         selectedLine = null
         lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return))
-        diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project))
-        installDiffBindings(detail)
+        val request = HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project)
+        diffPanel.setRequest(request)
+        installDiffBindings(request)
         val fileNode = (0 until rootNode.childCount)
             .map { rootNode.getChildAt(it) as DefaultMutableTreeNode }
             .firstOrNull { (it.userObject as? HunkFileSummary)?.path == detail.path }
@@ -188,8 +190,8 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
             val thread = listOf(root) + repliesByParent[root.noteId].orEmpty()
             val map = lineMap ?: return@forEach
             val newLine = root.newRangeStart != null
-            val editor = installedEditors.getOrNull(if (newLine) 1 else 0)
-                ?: installedEditors.firstOrNull()
+            val side = if (newLine) HunkPatchDiffContentBuilder.Side.AFTER else HunkPatchDiffContentBuilder.Side.BEFORE
+            val editor = editorsBySide[side]
             val anchors = if (newLine) map.after else map.before
             val line = anchors.indexOfFirst { anchor ->
                 anchor?.let { it.hunkIndex == root.hunkIndex && it.sourceLine == root.newRangeStart } == true
@@ -232,9 +234,10 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         currentFileDetail?.let { detail ->
             selectedHunkIndex = index
             lineMap = HunkPatchDiffContentBuilder.lineMap(detail, Paths.get(project.basePath ?: return), index)
-            diffPanel.setRequest(HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project, index))
+            val request = HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project, index)
+            diffPanel.setRequest(request)
             clearDiffBindings()
-            installDiffBindings(detail, index)
+            installDiffBindings(request)
         }
     }
 
@@ -247,14 +250,15 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
         commentRequestedHandler?.invoke(detail.path, target.hunkIndex, target.line, target.oldLine, summary, rationale)
     }
 
-    private fun installDiffBindings(detail: HunkFileDetail, selectedHunk: Int? = null) {
+    private fun installDiffBindings(request: SimpleDiffRequest?) {
         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
             val editors = EditorFactory.getInstance().allEditors.filter {
                 isDescendant(it.component, diffPanel.component)
             }
-            installedEditors += editors
-            editors.forEachIndexed { index, editor ->
-                val anchors = if (index == 0) lineMap?.before else lineMap?.after
+            editors.forEach { editor ->
+                val side = request?.let { HunkPatchDiffContentBuilder.sideOf(editor, it) } ?: return@forEach
+                editorsBySide[side] = editor
+                val anchors = if (side == HunkPatchDiffContentBuilder.Side.BEFORE) lineMap?.before else lineMap?.after
                 val listener = object : SelectionListener {
                     override fun selectionChanged(event: SelectionEvent) {
                         if (!event.editor.selectionModel.hasSelection()) {
@@ -263,7 +267,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
                         }
                         val line = event.editor.document.getLineNumber(event.editor.selectionModel.selectionStart)
                         val anchor = anchors?.getOrNull(line) ?: return
-                        selectedLine = SelectedLine(anchor.sourceLine, anchor.hunkIndex, index == 0)
+                        selectedLine = SelectedLine(anchor.sourceLine, anchor.hunkIndex, side == HunkPatchDiffContentBuilder.Side.BEFORE)
                     }
                 }
                 selectionBindings += editor to listener
@@ -282,7 +286,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
                 }
                 mouseBindings += editor to mouseListener
                 editor.addEditorMouseListener(mouseListener, this)
-                if (index == 1 && anchors != null) installCommentGutters(editor, anchors)
+                if (side == HunkPatchDiffContentBuilder.Side.AFTER && anchors != null) installCommentGutters(editor, anchors)
             }
             renderNotes()
         }
@@ -480,7 +484,7 @@ class SimpleTreeHunkReviewUiHost(private val project: Project) : HunkReviewUiHos
             editor.selectionModel.removeSelectionListener(listener)
         }
         selectionBindings.clear()
-        installedEditors.clear()
+        editorsBySide.clear()
     }
 
     private fun isDescendant(child: java.awt.Component, parent: java.awt.Container): Boolean {

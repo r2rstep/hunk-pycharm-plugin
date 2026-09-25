@@ -14,7 +14,8 @@ class HunkPluginSettings : PersistentStateComponent<HunkPluginSettings.State> {
     data class State(
         var cliPath: String? = null,
         var pollIntervalMs: Long = 2500L,
-        var lastComparisonRef: String = DEFAULT_COMPARISON_REF
+        var lastComparisonRef: String = DEFAULT_COMPARISON_REF,
+        var defaultGroupByDirectory: Boolean = false
     )
 
     private var state = State()
@@ -30,6 +31,10 @@ class HunkPluginSettings : PersistentStateComponent<HunkPluginSettings.State> {
     var lastComparisonRef: String
         get() = state.lastComparisonRef
         set(value) { state.lastComparisonRef = value }
+
+    var defaultGroupByDirectory: Boolean
+        get() = state.defaultGroupByDirectory
+        set(value) { state.defaultGroupByDirectory = value }
 
     override fun getState(): State = state
 

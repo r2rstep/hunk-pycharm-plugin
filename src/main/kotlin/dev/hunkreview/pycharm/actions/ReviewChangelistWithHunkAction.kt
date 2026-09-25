@@ -14,7 +14,7 @@ import dev.hunkreview.pycharm.session.HunkSessionService
 /**
  * Commit/Local Changes tool window context menu: "Review Changelist with
  * Hunk". Reviews only the files in the current selection (a changelist, or
- * a subset of changes within one), via `hunk diff -- <paths>`.
+ * a subset of changes within one), via `hunk diff HEAD -- <paths>`.
  */
 class ReviewChangelistWithHunkAction : DumbAwareAction() {
 

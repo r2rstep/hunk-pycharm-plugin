@@ -2,7 +2,9 @@ package dev.hunkreview.pycharm.ui.simple
 
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.contents.DiffContent
+import com.intellij.diff.contents.DocumentContent
 import com.intellij.diff.requests.SimpleDiffRequest
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diff.impl.patch.PatchHunk
@@ -14,6 +16,17 @@ import java.nio.file.Path
 
 /** Builds a native diff from the complete working-tree file and Hunk's patch. */
 object HunkPatchDiffContentBuilder {
+
+    enum class Side { BEFORE, AFTER }
+
+    /** EmptyContent has no editor, so editor order does not identify the diff side. */
+    fun sideOf(editor: Editor, request: SimpleDiffRequest): Side? = when (
+        request.contents.indexOfFirst { (it as? DocumentContent)?.document === editor.document }
+    ) {
+        0 -> Side.BEFORE
+        1 -> Side.AFTER
+        else -> null
+    }
 
     data class LineAnchor(val sourceLine: Int, val hunkIndex: Int)
 

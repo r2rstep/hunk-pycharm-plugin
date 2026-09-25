@@ -17,16 +17,29 @@ object HunkCliLocator {
     val MINIMUM_VERSION = HunkVersion(0, 22, 0)
 
     fun resolveBinary(): String {
-        val configured = HunkPluginSettings.getInstance().cliPath
-        if (!configured.isNullOrBlank()) {
-            val file = File(configured)
-            if (file.canExecute()) return file.absolutePath
+        val configured = HunkPluginSettings.getInstance().cliPath?.trim()
+        if (!configured.isNullOrEmpty()) {
+            val file = if (configured == "~" || configured.startsWith("~/")) {
+                File(System.getProperty("user.home"), configured.removePrefix("~").removePrefix("/"))
+            } else {
+                File(configured)
+            }
+            if (file.isFile && file.canExecute()) return file.absolutePath
             throw HunkCliException.BinaryMissing(configured)
         }
 
-        val fromPath = PathEnvironmentVariableUtil.findInPath("hunk")
-            ?: throw HunkCliException.BinaryMissing("hunk (not found on PATH)")
-        return fromPath.absolutePath
+        PathEnvironmentVariableUtil.findInPath("hunk")?.let { return it.absolutePath }
+
+        // Desktop-launched IDEs commonly inherit a minimal PATH without the
+        // user's npm bin directory, even when a terminal finds `hunk`.
+        val home = File(System.getProperty("user.home"))
+        val userBins = listOf(".npm-global/bin", ".local/bin", ".volta/bin", ".bun/bin")
+        userBins.asSequence()
+            .map { File(home, "$it/hunk") }
+            .firstOrNull { it.isFile && it.canExecute() }
+            ?.let { return it.absolutePath }
+
+        throw HunkCliException.BinaryMissing("hunk (not found on PATH or in common user bin directories)")
     }
 
     fun checkVersion(binaryPath: String): HunkVersion {

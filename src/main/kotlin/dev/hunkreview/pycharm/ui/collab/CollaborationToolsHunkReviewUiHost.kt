@@ -7,6 +7,7 @@ import com.intellij.collaboration.ui.codereview.diff.AddCommentGutterIconRendere
 import com.intellij.collaboration.ui.codereview.diff.EditorComponentInlaysManager
 import com.intellij.collaboration.ui.codereview.timeline.thread.TimelineThreadCommentsPanel
 import com.intellij.diff.DiffRequestPanel
+import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.impl.DiffRequestPanelImpl
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -29,6 +30,7 @@ import com.intellij.ui.CollectionListModel
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.OnePixelSplitter
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
@@ -40,6 +42,7 @@ import dev.hunkreview.pycharm.model.HunkFileDetail
 import dev.hunkreview.pycharm.model.HunkFileSummary
 import dev.hunkreview.pycharm.model.HunkNote
 import dev.hunkreview.pycharm.model.HunkReview
+import dev.hunkreview.pycharm.settings.HunkPluginSettings
 import dev.hunkreview.pycharm.ui.HunkReviewUiHost
 import dev.hunkreview.pycharm.ui.simple.HunkPatchDiffContentBuilder
 import java.awt.BorderLayout
@@ -106,6 +109,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
     private var lineMap: HunkPatchDiffContentBuilder.LineMap? = null
     private var currentNotes: List<HunkNote> = emptyList()
     private val installedEditors = mutableListOf<Editor>()
+    private val editorsBySide = mutableMapOf<HunkPatchDiffContentBuilder.Side, Editor>()
     private val selectionBindings = mutableListOf<Pair<Editor, SelectionListener>>()
     private val noteInlayManagers = mutableListOf<EditorComponentInlaysManager>()
     private val replyDrafts = mutableMapOf<String, String>()
@@ -117,8 +121,11 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
 
     private var filesListExpandedProportion = 0.32f
     private var filesListCollapsed = false
-    private var groupByDirectory = false
+    private var groupByDirectory = HunkPluginSettings.getInstance().defaultGroupByDirectory
+    private var renderedSessionId: String? = null
+    private var onlyFilesWithComments = false
     private var currentFiles: List<HunkFileSummary> = emptyList()
+    private var commentCountsByFile: Map<String, Int> = emptyMap()
     private var selectedFilePath: String? = null
     private var restoringFileSelection = false
     private val selectedFileLabel = JLabel("Select a file").apply {
@@ -199,7 +206,17 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
                 when (val userObject = (value as? DefaultMutableTreeNode)?.userObject) {
                     is HunkFileSummary -> {
                         val displayPath = if (groupByDirectory) userObject.path.substringAfterLast('/') else userObject.path
-                        append("$displayPath  (+${userObject.additions} -${userObject.deletions})")
+                        val commentCount = commentCountsByFile[userObject.path] ?: 0
+                        if (commentCount > 0) {
+                            append("$commentCount  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        }
+                        val pathAttributes = if (commentCount > 0) {
+                            SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, null)
+                        } else {
+                            SimpleTextAttributes.REGULAR_ATTRIBUTES
+                        }
+                        append(displayPath, pathAttributes)
+                        append("  (+${userObject.additions} -${userObject.deletions})")
                     }
                     is DirectoryNode -> {
                         icon = AllIcons.Nodes.Folder
@@ -250,10 +267,22 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
             groupByDirectory = directoryItem.isSelected
             rebuildFileTree()
         }
-        JPopupMenu().apply { add(directoryItem) }.show(invoker, 0, invoker.height)
+        val commentsItem = JCheckBoxMenuItem("Only files with comments", onlyFilesWithComments)
+        commentsItem.addActionListener {
+            onlyFilesWithComments = commentsItem.isSelected
+            rebuildFileTree()
+        }
+        JPopupMenu().apply {
+            add(directoryItem)
+            add(commentsItem)
+        }.show(invoker, 0, invoker.height)
     }
 
     override fun render(review: HunkReview, files: List<HunkFileSummary>) {
+        if (renderedSessionId != review.sessionId) {
+            groupByDirectory = HunkPluginSettings.getInstance().defaultGroupByDirectory
+            renderedSessionId = review.sessionId
+        }
         rootNode.userObject = review.title ?: review.sessionId
         currentFileDetail = null
         selectedFilePath = null
@@ -267,10 +296,13 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
 
     private fun rebuildFileTree() {
         rootNode.removeAllChildren()
+        val visibleFiles = if (onlyFilesWithComments) {
+            currentFiles.filter { (commentCountsByFile[it.path] ?: 0) > 0 }
+        } else currentFiles
         if (groupByDirectory) {
-            buildDirectoryNodes(currentFiles).forEach { rootNode.add(it) }
+            buildDirectoryNodes(visibleFiles).forEach { rootNode.add(it) }
         } else {
-            currentFiles.forEach { file -> rootNode.add(DefaultMutableTreeNode(file)) }
+            visibleFiles.forEach { file -> rootNode.add(DefaultMutableTreeNode(file)) }
         }
         treeModel.reload()
         if (groupByDirectory) {
@@ -368,7 +400,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         val request = HunkPatchDiffContentBuilder.build(detail, Paths.get(project.basePath ?: return), project)
         request?.putUserData(DiffUserDataKeysEx.SCROLL_TO_CHANGE, DiffUserDataKeysEx.ScrollToPolicy.FIRST_CHANGE)
         diffPanel.setRequest(request)
-        installDiffBindings(detail)
+        installDiffBindings(request)
     }
 
     override fun updateNotes(notes: List<HunkNote>) {
@@ -379,12 +411,23 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         // out from under them mid-keystroke.
         if (notes == currentNotes) return
         currentNotes = notes
+        commentCountsByFile = notes.asSequence()
+            .filter { it.parentId == null }
+            .groupingBy { it.filePath }
+            .eachCount()
+        rebuildFileTree()
         renderNotes()
     }
 
     private fun renderNotes() {
         val focusedThreadId = replyTextAreas.entries.firstOrNull { it.value.isFocusOwner }?.key
         val focusedCaret = focusedThreadId?.let { replyTextAreas[it]?.caretPosition }
+        // clearNoteInlays()+rebuild below tears down every thread's block
+        // inlay in the file, not just the one that changed - which shifts
+        // each editor's viewport as inlay heights disappear and reappear.
+        // Restore the pre-rebuild offset so replying/commenting doesn't
+        // scroll the diff to wherever the last-rebuilt thread lands.
+        val scrollOffsets = installedEditors.associateWith { it.scrollingModel.verticalScrollOffset }
         clearNoteInlays()
         val detail = currentFileDetail ?: return
         val notesForFile = currentNotes.filter { it.filePath == detail.path }
@@ -393,8 +436,8 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
             val thread = listOf(root) + repliesByParent[root.noteId].orEmpty()
             val map = lineMap ?: return@forEach
             val newLine = root.newRangeStart != null
-            val editor = installedEditors.getOrNull(if (newLine) 1 else 0)
-                ?: installedEditors.firstOrNull()
+            val side = if (newLine) HunkPatchDiffContentBuilder.Side.AFTER else HunkPatchDiffContentBuilder.Side.BEFORE
+            val editor = editorsBySide[side]
             val anchors = if (newLine) map.after else map.before
             val line = anchors.indexOfFirst { anchor ->
                 anchor?.let { it.hunkIndex == root.hunkIndex && it.sourceLine == root.newRangeStart } == true
@@ -410,6 +453,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
                 area.caretPosition = (focusedCaret ?: area.text.length).coerceIn(0, area.text.length)
             }
         }
+        scrollOffsets.forEach { (editor, offset) -> editor.scrollingModel.scrollVertically(offset) }
     }
 
     override fun onFileSelected(handler: (path: String) -> Unit) {
@@ -441,14 +485,16 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
 
     private data class DirectoryNode(val name: String)
 
-    private fun installDiffBindings(detail: HunkFileDetail) {
+    private fun installDiffBindings(request: SimpleDiffRequest?) {
         ApplicationManager.getApplication().invokeLater {
             val editors = EditorFactory.getInstance().allEditors.filter {
                 isDescendant(it.component, diffPanel.component)
             }
             installedEditors += editors
-            editors.forEachIndexed { index, editor ->
-                val anchors = if (index == 0) lineMap?.before else lineMap?.after
+            editors.forEach { editor ->
+                val side = request?.let { HunkPatchDiffContentBuilder.sideOf(editor, it) } ?: return@forEach
+                editorsBySide[side] = editor
+                val anchors = if (side == HunkPatchDiffContentBuilder.Side.BEFORE) lineMap?.before else lineMap?.after
                 val listener = object : SelectionListener {
                     override fun selectionChanged(event: SelectionEvent) {
                         if (!event.editor.selectionModel.hasSelection()) {
@@ -457,12 +503,12 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
                         }
                         val line = event.editor.document.getLineNumber(event.editor.selectionModel.selectionStart)
                         val anchor = anchors?.getOrNull(line) ?: return
-                        selectedLine = SelectedLine(anchor.sourceLine, anchor.hunkIndex, index == 0)
+                        selectedLine = SelectedLine(anchor.sourceLine, anchor.hunkIndex, side == HunkPatchDiffContentBuilder.Side.BEFORE)
                     }
                 }
                 selectionBindings += editor to listener
                 editor.selectionModel.addSelectionListener(listener, this)
-                if (index == 1 && anchors != null) installCommentGutters(editor, anchors)
+                if (side == HunkPatchDiffContentBuilder.Side.AFTER && anchors != null) installCommentGutters(editor, anchors)
             }
             renderNotes()
         }
@@ -655,6 +701,7 @@ class CollaborationToolsHunkReviewUiHost(private val project: Project) : HunkRev
         }
         selectionBindings.clear()
         installedEditors.clear()
+        editorsBySide.clear()
     }
 
     private fun isDescendant(child: java.awt.Component, parent: java.awt.Container): Boolean {

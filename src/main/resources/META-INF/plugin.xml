@@ -16,6 +16,10 @@
     </dependencies>
 
     <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable parentId="tools"
+                                 id="dev.hunkreview.hunk.settings"
+                                 displayName="Hunk Review"
+                                 instance="dev.hunkreview.pycharm.settings.HunkReviewConfigurable"/>
         <toolWindow id="Hunk Review"
                     anchor="right"
                     factoryClass="dev.hunkreview.pycharm.ui.HunkReviewToolWindowFactory"/>
